@@ -279,6 +279,28 @@ class _SearchScreenState extends State<SearchScreen> {
                       },
                     ),
                   ),
+
+            if (totalResults > resultsPerPage)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(
+                      onPressed: currentPage > 1 ? previousPage : null,
+                      icon: const Icon(Icons.arrow_back, color: Colors.blue),
+                    ),
+                    Text(
+                      "Page $currentPage / ${((totalResults - 1) ~/ resultsPerPage) + 1}",
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      onPressed: (currentPage * resultsPerPage) < totalResults ? nextPage : null,
+                      icon: const Icon(Icons.arrow_forward, color: Colors.blue),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
