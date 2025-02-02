@@ -16,6 +16,8 @@ class _SearchScreenState extends State<SearchScreen> {
   List<SearchResult> searchResults = [];
   bool isLoading = false;
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _textFocusNode = FocusNode(); // Pour empêcher le clavier de s'ouvrir
+
   stt.SpeechToText speech = stt.SpeechToText();
   bool isListening = false;
   late Timer _animationTimer;
@@ -26,8 +28,17 @@ class _SearchScreenState extends State<SearchScreen> {
   static const int resultsPerPage = 10;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _textFocusNode.unfocus(); // Désactive le focus au chargement
+    });
+  }
+
+  @override
   void dispose() {
     _animationTimer.cancel();
+    _textFocusNode.dispose();
     super.dispose();
   }
 
@@ -62,6 +73,7 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   void navigateToDetail(BuildContext context, SearchResult result) {
+    _textFocusNode.unfocus(); // Désactive le clavier avant de naviguer
     Navigator.of(context).push(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 500),
@@ -90,7 +102,6 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  // 🎤 Démarrer l'écoute et animer les barres
   void startListening() async {
     bool available = await speech.initialize(
       onStatus: (status) {
@@ -98,7 +109,7 @@ class _SearchScreenState extends State<SearchScreen> {
           setState(() {
             isListening = false;
             _animationTimer.cancel();
-            search(); // 🔍 Lancer la recherche quand l'écoute se termine
+            search();
           });
         }
       },
@@ -152,6 +163,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
+                      focusNode: _textFocusNode, // Désactive le focus au retour
                       decoration: InputDecoration(
                         hintText: "Rechercher un document...",
                         border: InputBorder.none,
@@ -267,28 +279,6 @@ class _SearchScreenState extends State<SearchScreen> {
                       },
                     ),
                   ),
-
-            if (totalResults > resultsPerPage)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    IconButton(
-                      onPressed: currentPage > 1 ? previousPage : null,
-                      icon: const Icon(Icons.arrow_back, color: Colors.blue),
-                    ),
-                    Text(
-                      "Page $currentPage / ${((totalResults - 1) ~/ resultsPerPage) + 1}",
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    IconButton(
-                      onPressed: (currentPage * resultsPerPage) < totalResults ? nextPage : null,
-                      icon: const Icon(Icons.arrow_forward, color: Colors.blue),
-                    ),
-                  ],
-                ),
-              ),
           ],
         ),
       ),
