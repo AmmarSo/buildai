@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:buildai/models/search_result.dart';
 import 'package:buildai/screens/detail_screen.dart';
 import 'package:buildai/services/api_service.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'dart:async';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -14,10 +16,20 @@ class _SearchScreenState extends State<SearchScreen> {
   List<SearchResult> searchResults = [];
   bool isLoading = false;
   final TextEditingController _controller = TextEditingController();
+  stt.SpeechToText speech = stt.SpeechToText();
+  bool isListening = false;
+  late Timer _animationTimer;
+  List<double> barHeights = [5, 10, 5];
 
   int currentPage = 1;
   int totalResults = 0;
   static const int resultsPerPage = 10;
+
+  @override
+  void dispose() {
+    _animationTimer.cancel();
+    super.dispose();
+  }
 
   void search() async {
     if (_controller.text.isEmpty) return;
@@ -54,7 +66,7 @@ class _SearchScreenState extends State<SearchScreen> {
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 500),
         pageBuilder: (context, animation, secondaryAnimation) =>
-            DetailScreen(result: result, documentId: '',),
+            DetailScreen(result: result, documentId: ''),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           var begin = const Offset(1.0, 0.0);
           var end = Offset.zero;
@@ -78,6 +90,45 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  // 🎤 Démarrer l'écoute et animer les barres
+  void startListening() async {
+    bool available = await speech.initialize(
+      onStatus: (status) {
+        if (status == "done") {
+          setState(() {
+            isListening = false;
+            _animationTimer.cancel();
+            search(); // 🔍 Lancer la recherche quand l'écoute se termine
+          });
+        }
+      },
+      onError: (error) {
+        setState(() {
+          isListening = false;
+          _animationTimer.cancel();
+        });
+      },
+    );
+
+    if (available) {
+      setState(() => isListening = true);
+
+      _animationTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
+        setState(() {
+          barHeights = List.generate(3, (_) => (5 + (20 * (0.5 + 0.5 * (0.5 - 0.5 * (DateTime.now().millisecond % 100) / 100)))));
+        });
+      });
+
+      speech.listen(
+        onResult: (result) {
+          setState(() {
+            _controller.text = result.recognizedWords;
+          });
+        },
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     List<SearchResult> paginatedResults = searchResults
@@ -96,18 +147,52 @@ class _SearchScreenState extends State<SearchScreen> {
                 color: Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(30),
               ),
-              child: TextField(
-                controller: _controller,
-                decoration: InputDecoration(
-                  hintText: "Rechercher un document...",
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  suffixIcon: IconButton(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      decoration: InputDecoration(
+                        hintText: "Rechercher un document...",
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      ),
+                      onSubmitted: (_) => search(),
+                    ),
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.search, color: Colors.blue),
                     onPressed: search,
                   ),
-                ),
-                onSubmitted: (_) => search(),
+                  GestureDetector(
+                    onTap: startListening,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isListening ? Colors.green : Colors.grey,
+                        shape: BoxShape.circle,
+                      ),
+                      child: isListening
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: barHeights.map((height) {
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: 5,
+                                  height: height,
+                                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                );
+                              }).toList(),
+                            )
+                          : const Icon(Icons.mic, color: Colors.white),
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -124,82 +209,64 @@ class _SearchScreenState extends State<SearchScreen> {
 
             isLoading
                 ? const CircularProgressIndicator()
-                : paginatedResults.isEmpty
-                    ? Expanded(
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.search_off, size: 60, color: Colors.grey.shade400),
-                              const SizedBox(height: 10),
-                              Text(
-                                "Aucun résultat trouvé",
-                                style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : Expanded(
-                        child: ListView.builder(
-                          itemCount: paginatedResults.length,
-                          itemBuilder: (context, index) {
-                            final result = paginatedResults[index];
+                : Expanded(
+                    child: ListView.builder(
+                      itemCount: paginatedResults.length,
+                      itemBuilder: (context, index) {
+                        final result = paginatedResults[index];
 
-                            return GestureDetector(
-                              onTap: () => navigateToDetail(context, result),
-                              child: Card(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                elevation: 4,
-                                margin: const EdgeInsets.symmetric(vertical: 8.0),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12.0),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      CircleAvatar(
-                                        backgroundColor: Colors.blue.shade100,
-                                        child: const Icon(Icons.article, color: Colors.blue),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              result.titre,
-                                              style: const TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              "📌 ${result.theme}",
-                                              style: const TextStyle(color: Colors.blue, fontSize: 14),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              "🔗 ${result.source}",
-                                              style: const TextStyle(color: Colors.grey, fontSize: 12),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.grey),
-                                    ],
+                        return GestureDetector(
+                          onTap: () => navigateToDetail(context, result),
+                          child: Card(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            elevation: 4,
+                            margin: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: Colors.blue.shade100,
+                                    child: const Icon(Icons.article, color: Colors.blue),
                                   ),
-                                ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          result.titre,
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          "📌 ${result.theme}",
+                                          style: const TextStyle(color: Colors.blue, fontSize: 14),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          "🔗 ${result.source}",
+                                          style: const TextStyle(color: Colors.grey, fontSize: 12),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                            );
-                          },
-                        ),
-                      ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
 
             if (totalResults > resultsPerPage)
               Padding(
@@ -209,7 +276,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   children: [
                     IconButton(
                       onPressed: currentPage > 1 ? previousPage : null,
-                      icon: Icon(Icons.arrow_back, color: currentPage > 1 ? Colors.blue : Colors.grey),
+                      icon: const Icon(Icons.arrow_back, color: Colors.blue),
                     ),
                     Text(
                       "Page $currentPage / ${((totalResults - 1) ~/ resultsPerPage) + 1}",
@@ -217,7 +284,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     ),
                     IconButton(
                       onPressed: (currentPage * resultsPerPage) < totalResults ? nextPage : null,
-                      icon: Icon(Icons.arrow_forward, color: (currentPage * resultsPerPage) < totalResults ? Colors.blue : Colors.grey),
+                      icon: const Icon(Icons.arrow_forward, color: Colors.blue),
                     ),
                   ],
                 ),
