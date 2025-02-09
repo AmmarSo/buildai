@@ -164,10 +164,10 @@ class _SearchScreenState extends State<SearchScreen> {
                     child: TextField(
                       controller: _controller,
                       focusNode: _textFocusNode, // Désactive le focus au retour
-                      decoration: InputDecoration(
+                      decoration: const InputDecoration(
                         hintText: "Rechercher un document...",
                         border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       ),
                       onSubmitted: (_) => search(),
                     ),

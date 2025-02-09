@@ -27,24 +27,17 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> fetchDocumentDetails() async {
     try {
-      final documentDetail =
-          await ApiService.getDocumentDetail(widget.result.id);
+      final documentDetail = await ApiService.getDocumentDetail(widget.result.id);
 
-      // Si le texte n'est pas disponible, récupère une description externe
       if (documentDetail.texte == "N/A" || documentDetail.texte == null) {
-        externalDescription =
-            await ApiService.fetchExternalDescription(widget.result.titre);
+        externalDescription = await ApiService.fetchExternalDescription(widget.result.titre);
       }
 
       if (!mounted) return;
       setState(() {
-        documentText = documentDetail.texte != "N/A"
-            ? documentDetail.texte!
-            : externalDescription ?? "Aucune information disponible.";
-        aRetenir =
-            documentDetail.aRetenir != "N/A" ? documentDetail.aRetenir : null;
-        thematique =
-            documentDetail.theme != "N/A" ? documentDetail.theme : null;
+        documentText = documentDetail.texte != "N/A" ? documentDetail.texte! : externalDescription ?? "Aucune information disponible.";
+        aRetenir = documentDetail.aRetenir != "N/A" ? documentDetail.aRetenir : null;
+        thematique = documentDetail.theme != "N/A" ? documentDetail.theme : null;
         isLoading = false;
       });
     } catch (e) {
@@ -56,11 +49,52 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  Future<void> generateCourse() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const Center(child: CircularProgressIndicator());
+      },
+    );
+
+    try {
+      String response = await ApiService.askLLM("Peux-tu générer un cours sur le thème suivant : ${widget.result.titre} ?");
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Ferme la fenêtre de chargement
+
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text("Cours généré"),
+            content: SingleChildScrollView(
+              child: Text(response),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text("Fermer"),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // Ferme la fenêtre de chargement
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("❌ Erreur lors de la génération du cours."),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Palette minimaliste
     const backgroundColor = Colors.white;
-    const accentColor = Color(0xFF1A73E8);
     const textColor = Color(0xFF202124);
     const chipBackground = Color(0xFFE8F0FE);
 
@@ -70,7 +104,6 @@ class _DetailScreenState extends State<DetailScreen> {
         backgroundColor: backgroundColor,
         elevation: 1,
         automaticallyImplyLeading: true,
-        // Pas de titre dans l'AppBar, le titre est affiché dans le corps
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -78,7 +111,6 @@ class _DetailScreenState extends State<DetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Titre du document (affiché dans le corps)
               Hero(
                 tag: widget.result.id,
                 child: Material(
@@ -94,7 +126,6 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              // Thématiques sous forme de Chips (si disponibles)
               if (thematique != null && thematique!.isNotEmpty)
                 Wrap(
                   spacing: 8.0,
@@ -112,13 +143,11 @@ class _DetailScreenState extends State<DetailScreen> {
                   }).toList(),
                 ),
               const SizedBox(height: 16),
-              // Affichage de la source
               Text(
                 "Source : ${widget.result.source}",
                 style: const TextStyle(fontSize: 14, color: textColor),
               ),
               const SizedBox(height: 24),
-              // Section "À retenir" (si disponible)
               if (aRetenir != null && aRetenir!.isNotEmpty) ...[
                 const Text(
                   "📌 À retenir",
@@ -136,13 +165,6 @@ class _DetailScreenState extends State<DetailScreen> {
                     color: backgroundColor,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.grey.shade300),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
                   ),
                   child: Text(
                     aRetenir!,
@@ -151,7 +173,6 @@ class _DetailScreenState extends State<DetailScreen> {
                 ),
                 const SizedBox(height: 24),
               ],
-              // Section "Contenu du document"
               const Text(
                 "📄 Contenu du document",
                 style: TextStyle(
@@ -170,74 +191,22 @@ class _DetailScreenState extends State<DetailScreen> {
                         color: backgroundColor,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: Colors.grey.shade300),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 6,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
                       ),
                       child: Text(
                         documentText,
-                        style:
-                            const TextStyle(fontSize: 16, color: textColor),
+                        style: const TextStyle(fontSize: 16, color: textColor),
                       ),
                     ),
               const SizedBox(height: 32),
-              // Bouton "Voir la source" stylisé
-              if (widget.result.lien.isNotEmpty)
-                Center(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF4285F4), Color(0xFF34A853)],
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                      ),
-                      borderRadius: BorderRadius.circular(30),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(30),
-                        onTap: () async {
-                          final uri = Uri.parse(widget.result.lien);
-                          if (await canLaunchUrl(uri)) {
-                            await launchUrl(uri);
-                          }
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 24, vertical: 16),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(Icons.open_in_browser,
-                                  color: Colors.white, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                "🔗 Voir la source",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+              ElevatedButton.icon(
+                onPressed: generateCourse,
+                icon: const Icon(Icons.school),
+                label: const Text("Générer un cours"),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
+              ),
             ],
           ),
         ),

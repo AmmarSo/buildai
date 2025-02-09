@@ -31,6 +31,27 @@ class ApiService {
     }
   }
 
+  // 🚀 Fonction pour envoyer une requête à l'endpoint de LLM
+  static Future<String> askLLM(String prompt) async {
+    final url = Uri.parse("$baseUrl/ask_llm");
+    try {
+      final response = await http.post(
+        url,
+        headers: {"Content-Type": "application/json"},
+        body: json.encode({"prompt": prompt}),
+      );
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return data["response"] ?? "Pas de réponse générée.";
+      } else {
+        throw Exception("Erreur lors de la communication avec LLM");
+      }
+    } catch (e) {
+      return "Erreur : ${e.toString()}";
+    }
+  }
+
   // 🚀 Fonction pour récupérer une description externe depuis Wikidata
   static Future<String?> fetchExternalDescription(String query) async {
     try {
