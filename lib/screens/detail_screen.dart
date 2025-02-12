@@ -1,7 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:buildai/models/search_result.dart';
 import 'package:buildai/services/api_service.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:lottie/lottie.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
 
 class DetailScreen extends StatefulWidget {
   final SearchResult result;
@@ -14,10 +21,13 @@ class DetailScreen extends StatefulWidget {
 
 class _DetailScreenState extends State<DetailScreen> {
   bool isLoading = true;
+  bool isGeneratingCourse = false;
   String documentText = "Chargement...";
   String? aRetenir;
   String? thematique;
   String? externalDescription;
+  String generatedCourse = "";
+  final ScrollController _scrollController = ScrollController(); // Controller pour le scroll
 
   @override
   void initState() {
@@ -35,7 +45,9 @@ class _DetailScreenState extends State<DetailScreen> {
 
       if (!mounted) return;
       setState(() {
-        documentText = documentDetail.texte != "N/A" ? documentDetail.texte! : externalDescription ?? "Aucune information disponible.";
+        documentText = documentDetail.texte != "N/A"
+            ? documentDetail.texte!
+            : externalDescription ?? "Aucune information disponible.";
         aRetenir = documentDetail.aRetenir != "N/A" ? documentDetail.aRetenir : null;
         thematique = documentDetail.theme != "N/A" ? documentDetail.theme : null;
         isLoading = false;
@@ -50,39 +62,28 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> generateCourse() async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return const Center(child: CircularProgressIndicator());
-      },
-    );
+    setState(() {
+      isGeneratingCourse = true;
+      generatedCourse = "";
+    });
+
+    // Descendre jusqu'au chargement
+    _scrollToBottom();
 
     try {
-      String response = await ApiService.askLLM("Peux-tu générer un cours sur le thème suivant : ${widget.result.titre} ?");
+      String response = await ApiService.askLLM("Tu es un expert dans le domaine du batiment, tu enseigne, tu va créer un cours en commençant par le titre du cours. TU va le strucutrer de manière propre et complète. Peux-tu générer un cours sur le thème suivant : ${widget.result.titre} ?");
       if (!mounted) return;
-      Navigator.of(context).pop(); // Ferme la fenêtre de chargement
 
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text("Cours généré"),
-            content: SingleChildScrollView(
-              child: Text(response),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text("Fermer"),
-              ),
-            ],
-          );
-        },
-      );
+      setState(() {
+        isGeneratingCourse = false;
+        generatedCourse = response;
+      });
+
+      // Descendre jusqu'au résultat
+      _scrollToBottom();
     } catch (e) {
       if (!mounted) return;
-      Navigator.of(context).pop(); // Ferme la fenêtre de chargement
+      setState(() => isGeneratingCourse = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("❌ Erreur lors de la génération du cours."),
@@ -90,6 +91,80 @@ class _DetailScreenState extends State<DetailScreen> {
         ),
       );
     }
+  }
+
+Future<void> saveCourseAsPDF() async {
+  // Charger la police depuis les assets
+  final fontData = await rootBundle.load("assets/fonts/OpenSans-Regular.ttf");
+  final ttf = pw.Font.ttf(fontData);
+
+  final pdf = pw.Document();
+
+  // Utilisation de MultiPage avec pw.Paragraph qui supporte le débordement sur plusieurs pages
+  pdf.addPage(
+    pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(20),
+      build: (pw.Context context) {
+        return [
+          pw.Paragraph(
+            text: generatedCourse,
+            style: pw.TextStyle(font: ttf, fontSize: 14),
+          ),
+        ];
+      },
+    ),
+  );
+
+  // Demande la permission pour écrire dans le dossier Téléchargements
+  var status = await Permission.storage.status;
+  if (!status.isGranted) {
+    await Permission.storage.request();
+  }
+
+  try {
+    final directory = Directory('/storage/emulated/0/Download');
+    if (!await directory.exists()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("❌ Dossier Téléchargements non trouvé."),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    // Nettoyer le titre pour obtenir un nom de fichier valide
+    String sanitizedTitle = widget.result.titre.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final file = File("${directory.path}/$sanitizedTitle.pdf");
+
+    await file.writeAsBytes(await pdf.save());
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("✅ Cours enregistré en PDF dans le dossier Téléchargements."),
+        backgroundColor: Colors.green,
+      ),
+    );
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("❌ Erreur lors de l'enregistrement du PDF."),
+        backgroundColor: Colors.redAccent,
+      ),
+    );
+  }
+}
+
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    });
   }
 
   @override
@@ -107,6 +182,7 @@ class _DetailScreenState extends State<DetailScreen> {
       ),
       body: SafeArea(
         child: SingleChildScrollView(
+          controller: _scrollController,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -142,12 +218,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     );
                   }).toList(),
                 ),
-              const SizedBox(height: 16),
-              Text(
-                "Source : ${widget.result.source}",
-                style: const TextStyle(fontSize: 14, color: textColor),
-              ),
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
               if (aRetenir != null && aRetenir!.isNotEmpty) ...[
                 const Text(
                   "📌 À retenir",
@@ -171,42 +242,126 @@ class _DetailScreenState extends State<DetailScreen> {
                     style: const TextStyle(fontSize: 16, color: textColor),
                   ),
                 ),
-                const SizedBox(height: 24),
-              ],
-              const Text(
-                "📄 Contenu du document",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  color: textColor,
-                ),
-              ),
-              const SizedBox(height: 12),
-              isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: backgroundColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Text(
-                        documentText,
-                        style: const TextStyle(fontSize: 16, color: textColor),
-                      ),
-                    ),
               const SizedBox(height: 32),
-              ElevatedButton.icon(
-                onPressed: generateCourse,
-                icon: const Icon(Icons.school),
-                label: const Text("Générer un cours"),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              Center(
+                child: GestureDetector(
+                  onTap: isGeneratingCourse ? null : generateCourse,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color.fromARGB(255, 79, 166, 228), Color.fromARGB(255, 94, 9, 221)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(50),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.2),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.auto_stories_rounded, color: Colors.white, size: 24),
+                        SizedBox(width: 8),
+                        Text(
+                          "Générer un cours",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
+              const SizedBox(height: 32),
+              if (isGeneratingCourse)
+                Center(
+                  child: Column(
+                    children: [
+                      Lottie.asset('assets/loading.json', width: 150),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Génération du cours en cours...",
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                      ),
+                    ],
+                  ),
+                ),
+              if (generatedCourse.isNotEmpty) ...[
+                const Text(
+                  "📝 Cours généré",
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: chipBackground,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: MarkdownBody(
+                    data: generatedCourse,
+                    selectable: true,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Center(
+  child: GestureDetector(
+    onTap: saveCourseAsPDF,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF6F61), Color(0xFFEF5350)], // Dégradé rouge
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(50),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.redAccent.withOpacity(0.4),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.picture_as_pdf, color: Colors.white, size: 24),
+          SizedBox(width: 12),
+          Text(
+            "Télécharger en PDF",
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    ),
+  ),
+),
+
+              ],
+            ],
             ],
           ),
         ),
